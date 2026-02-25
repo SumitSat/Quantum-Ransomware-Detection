@@ -1,0 +1,24 @@
+﻿python : Traceback (most recent 
+call last):
+At line:1 char:1
++ python -u src/train.py --device 
+default.qubit --epochs 1 
+--batch-size ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~
+    + CategoryInfo          : Not 
+   Specified: (Traceback (most r  
+  ecent call last)::String) [],   
+  RemoteException
+    + FullyQualifiedErrorId : Nat 
+   iveCommandError
+ 
+  File "C:\Users\Shashwat\OneDrive
+\Desktop\ransomeware\QML based 
+Ransomeware early 
+detection\src\train.py", line 4, 
+in <module>
+    import torch
+ModuleNotFoundError: No module 
+named 'torch'
