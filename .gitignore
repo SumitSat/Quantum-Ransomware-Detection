@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Data
+data/
+!data/.gitkeep
+*.csv
+*.json
+*.h5
+*.pt
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# VS Code
+.vscode/
+
+# Models & Checkpoints
+checkpoints/
+
+# OS generated files
+.DS_Store
+Thumbs.db
