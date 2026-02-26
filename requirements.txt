@@ -10,3 +10,4 @@ tqdm>=4.65.0
 xgboost>=2.0.0
 scipy>=1.10.0
 pytest>=7.0.0
+imbalanced-learn
