@@ -33,29 +33,48 @@ def extract_cnn_features(X):
         embeddings = cnn(X_tensor).numpy()
     return embeddings
 
-def get_dataloaders(test_size=0.2):
+def get_dataloaders(test_size=0.2, model_type="cnn-vqc"):
     X, y = load_raw_features()
     
-    # 1. Feature Extraction
-    X_emb = extract_cnn_features(X)
-    
-    # 2. Train/Test Split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_emb, y, test_size=test_size, random_state=SEED, stratify=y
-    )
-    
-    # 3. Scale and PCA
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    
-    pca = PCA(n_components=PCA_COMPONENTS)
-    X_train_pca = pca.fit_transform(X_train_scaled)
-    X_test_pca = pca.transform(X_test_scaled)
-    
+    if model_type == "cnn-vqc":
+        # 1. Feature Extraction via CNN
+        X_processed = extract_cnn_features(X)
+        
+        # 2. Train/Test Split
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_processed, y, test_size=test_size, random_state=SEED, stratify=y
+        )
+        
+        # 3. Scale and PCA
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+        
+        pca = PCA(n_components=PCA_COMPONENTS)
+        X_train_final = pca.fit_transform(X_train_scaled)
+        X_test_final = pca.transform(X_test_scaled)
+    else:
+        # QLSTM Mode: Return pure sequences
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=SEED, stratify=y
+        )
+        # Scale each channel
+        scaler = StandardScaler()
+        N_tr, S, C = X_train.shape
+        N_te, _, _ = X_test.shape
+        X_train_flat = X_train.reshape(-1, C)
+        X_test_flat = X_test.reshape(-1, C)
+        
+        X_train_scaled = scaler.fit_transform(X_train_flat).reshape(N_tr, S, C)
+        X_test_scaled = scaler.transform(X_test_flat).reshape(N_te, S, C)
+        
+        X_train_final = X_train_scaled
+        X_test_final = X_test_scaled
+        pca = None
+        
     # 4. Create DataLoaders
-    train_dataset = TensorDataset(torch.FloatTensor(X_train_pca), torch.FloatTensor(y_train))
-    test_dataset = TensorDataset(torch.FloatTensor(X_test_pca), torch.FloatTensor(y_test))
+    train_dataset = TensorDataset(torch.FloatTensor(X_train_final), torch.FloatTensor(y_train))
+    test_dataset = TensorDataset(torch.FloatTensor(X_test_final), torch.FloatTensor(y_test))
     
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)

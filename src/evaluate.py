@@ -1,46 +1,58 @@
 import os
+import argparse
 import torch
-import numpy as np
-import pandas as pd
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from src.dataset import get_dataloaders
 from src.model import HybridQuantumNet
-from src.config import SEED, CHECKPOINT_DIR
+from src.model_qlstm import QTERD_QLSTM
+from src.config import SEED, CHECKPOINT_DIR, N_CHANNELS
 
-def evaluate(device_string):
+def evaluate(device_string, model_type="qlstm"):
     torch.manual_seed(SEED)
-    print("Loading data...")
-    train_loader, test_loader, pca_model, scaler_model = get_dataloaders()
     
-    model_path = os.path.join(CHECKPOINT_DIR, "vqc_model.pt")
-    if not os.path.exists(model_path):
-        print(f"Error: Model checkpoint not found at {model_path}")
-        return
+    print(f"Loading test data for {model_type}...")
+    _, test_loader, _, _ = get_dataloaders(model_type=model_type)
+    
+    print(f"Initializing {model_type.upper()} Network on {device_string}...")
+    if model_type == "cnn-vqc":
+        model = HybridQuantumNet(device_string=device_string)
+    else:
+        model = QTERD_QLSTM(input_size=N_CHANNELS, hidden_size=16, n_qubits=4, n_vqc_layers=1, backend=device_string)
         
-    print(f"Loading trained Quantum Network on {device_string}...")
-    model = HybridQuantumNet(device_string=device_string)
-    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+    latest_path = os.path.join(CHECKPOINT_DIR, f"{model_type}_latest.pt")
+    if os.path.exists(latest_path):
+        model.load_state_dict(torch.load(latest_path, map_location='cpu'))
+        print(f"Loaded checkpoint {latest_path}")
+    else:
+        print(f"Warning: No checkpoint found at {latest_path}. Using uninitialized weights.")
+        
     model.eval()
-    
-    total = 0
-    correct = 0
+    y_true = []
+    y_pred = []
     
     with torch.no_grad():
         for X_batch, y_batch in test_loader:
-            # Squeeze to handle potential 1D dimension matching
-            outputs = model(X_batch)
-            if len(outputs.shape) > 1:
-                outputs = outputs.squeeze(1)
-            
+            outputs = model(X_batch).squeeze()
             preds = (outputs >= 0.5).float()
-            correct += (preds == y_batch).sum().item()
-            total += y_batch.size(0)
+            y_true.extend(y_batch.numpy())
+            y_pred.extend(preds.numpy())
             
-    print(f"Test Accuracy: {correct/total:.4f}")
+    acc = accuracy_score(y_true, y_pred)
+    prec = precision_score(y_true, y_pred, zero_division=0)
+    rec = recall_score(y_true, y_pred, zero_division=0)
+    f1 = f1_score(y_true, y_pred, zero_division=0)
+    
+    print(f"\n--- {model_type.upper()} Evaluation Metrics ---")
+    print(f"Accuracy:  {acc:.4f}")
+    print(f"Precision: {prec:.4f}")
+    print(f"Recall:    {rec:.4f}")
+    print(f"F1 Score:  {f1:.4f}")
+    print("-----------------------------------")
 
 if __name__ == "__main__":
-    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="default.qubit", help="PennyLane device string")
+    parser.add_argument("--model", type=str, choices=["cnn-vqc", "qlstm"], default="qlstm", help="Model architecture")
     args = parser.parse_args()
     
-    evaluate(args.device)
+    evaluate(device_string=args.device, model_type=args.model)
