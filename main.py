@@ -11,7 +11,7 @@ def run_step(script, args=""):
 
 def main():
     parser = argparse.ArgumentParser(description="Q-TERD Unified Execution Pipeline")
-    parser.add_argument("--device", type=str, default="lightning.gpu", help="PennyLane backend (default.qubit or lightning.gpu)")
+    parser.add_argument("--device", type=str, default="lightning.kokkos", help="PennyLane backend (default.qubit, lightning.gpu, or lightning.kokkos)")
     parser.add_argument("--epochs", type=int, default=10, help="Training Epochs")
     parser.add_argument("--batch-size", type=int, default=128, help="Batch Size")
     args = parser.parse_args()

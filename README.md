@@ -55,14 +55,14 @@ Because Quantum simulations and deep learning models require heavy computational
 4. **Run the Unified Execution Pipeline**
    We have created a single automated entry-point script (`main.py`) that strictly handles Data Synthesis, A/B Training (Baseline CNN-VQC vs QLSTM), Evaluation, and temporal Quantum-SHAP plotting automatically.
    ```bash
-   python main.py --device lightning.gpu --epochs 10 --batch-size 128
+   python main.py --device lightning.kokkos --epochs 10 --batch-size 128
    ```
 
    *Alternatively, run steps manually:*
    - `python src/data_loader.py`
-   - `python src/train.py --model qlstm`
-   - `python src/evaluate.py --model qlstm`
-   - `python src/explain.py --model qlstm`
+   - `python src/train.py --model qlstm --device lightning.kokkos`
+   - `python src/evaluate.py --model qlstm --device lightning.kokkos`
+   - `python src/explain.py --model qlstm --device lightning.kokkos`
 
 ## 📈 Expected Outputs
 After running the pipeline, check the `plots/` directory for `qlstm_temporal_shap.png`. You will see a strict spike in the 30-70s yellow highlighted zone validating the core "Actionable Lead-Time" USP of this paper. Checkpoints are automatically version-tagged in `checkpoints/`.
