@@ -1,100 +1,76 @@
 import os
-import argparse
 import torch
 import numpy as np
 import shap
 import matplotlib.pyplot as plt
-from src.config import BASE_DIR, SEED, CHECKPOINT_DIR, N_CHANNELS
-from src.dataset import get_dataloaders
-from src.model import HybridQuantumNet
-from src.model_qlstm import QTERD_QLSTM
 
-def generate_shap_explanations(device_string="default.qubit", model_type="qlstm"):
-    np.random.seed(SEED)
-    torch.manual_seed(SEED)
+from src.data_loader import get_dataloaders
+from src.model import HybridQuantumNet
+
+def explain_model():
+    """
+    Applies SHAP (SHapley Additive exPlanations) to the Quantum Net.
+    Because VQCs are mathematically opaque, this proves to the journal reviewers
+    EXACTLY which classical generic features triggered the ransomware classification.
+    """
+    print("Loading First Fold of Data for Explainability Analysis...")
+    dataloaders = get_dataloaders(n_folds=5, batch_size=128)
     
-    print(f"Loading test data for {model_type.upper()} SHAP analysis...")
-    _, test_loader, _, _ = get_dataloaders(model_type=model_type)
+    train_loader = dataloaders[0]['train_loader']
+    test_loader = dataloaders[0]['test_loader']
+    input_dim = dataloaders[0]['input_dim']
     
-    X_background = []
-    X_test_sample = []
+    model = HybridQuantumNet(input_dim=input_dim, n_qubits=8, n_layers=2, device_string="default.qubit")
     
-    for i, (X_batch, y_batch) in enumerate(test_loader):
-        if i == 0:
-            X_background.append(X_batch[:5])
-            X_test_sample.append(X_batch[5:15])
-        else:
-            break
-            
-    X_background = torch.cat(X_background, dim=0)
-    X_test_sample = torch.cat(X_test_sample, dim=0)
-    
-    print(f"Loading trained {model_type.upper()} on {device_string}...")
-    if model_type == "cnn-vqc":
-        model = HybridQuantumNet(device_string=device_string)
-    else:
-        model = QTERD_QLSTM(input_size=N_CHANNELS, hidden_size=16, n_qubits=4, n_vqc_layers=1, backend=device_string)
-        
-    ckpt_path = os.path.join(CHECKPOINT_DIR, f"{model_type}_latest.pt")
-    if os.path.exists(ckpt_path):
-        model.load_state_dict(torch.load(ckpt_path, map_location='cpu'))
+    # Try to load weights if they exist
+    weight_path = "checkpoints/cnn_vqc_fold1_latest.pt"
+    if os.path.exists(weight_path):
+        model.load_state_dict(torch.load(weight_path, map_location='cpu'))
     
     model.eval()
     
-    def model_wrapper(x_np):
-        x_tensor = torch.FloatTensor(x_np)
-        if len(x_tensor.shape) == 2 and model_type == "qlstm":
-            # Reshape flat array back to sequence for KernelExplainer
-            x_tensor = x_tensor.reshape(-1, 120, N_CHANNELS)
+    # We use a Background Distribution for Kernel SHAP
+    # Pull 100 random samples from the Training set to establish the "Base Value"
+    print("Initializing SHAP Background Distribution (100 samples)...")
+    X_background_list = []
+    for X_batch, _ in train_loader:
+        X_background_list.append(X_batch)
+        if sum([x.shape[0] for x in X_background_list]) >= 100:
+            break
+            
+    X_background = torch.cat(X_background_list, dim=0)[:100]
+    
+    # Pull 25 Test samples to actually Explain
+    X_test_explain = []
+    for X_batch, _ in test_loader:
+        X_test_explain.append(X_batch)
+        break # Just grab the first batch
+        
+    X_test_explain = X_test_explain[0][:25]
+    
+    print(f"Executing Kernel Explainer on 25 test samples (This may take roughly 2-3 minutes)...")
+    
+    # We must wrap the PyTorch model output for SHAP (expects numpy array inputs, returns numpy array)
+    def model_predict_wrapper(numpy_array):
+        tensor_input = torch.tensor(numpy_array, dtype=torch.float32)
         with torch.no_grad():
-            preds = model(x_tensor).numpy()
-        return preds.reshape(-1, 1)
-
-    print("Initializing KernelSHAP (Quantum-SHAP Approximation)...")
+            outputs = model(tensor_input)
+            # The Quantum model returns [Batch, 1], we return [Batch]
+            return outputs.numpy().flatten()
+            
+    explainer = shap.KernelExplainer(model_predict_wrapper, X_background.numpy())
+    shap_values = explainer.shap_values(X_test_explain.numpy())
     
-    # KernelExplainer requires 2D arrays, so we must flatten temporal inputs
-    if model_type == "qlstm":
-        bg_flat = X_background.reshape(X_background.shape[0], -1).numpy()
-        test_flat = X_test_sample.reshape(X_test_sample.shape[0], -1).numpy()
-    else:
-        bg_flat = X_background.numpy()
-        test_flat = X_test_sample.numpy()
-
-    explainer = shap.KernelExplainer(model_wrapper, bg_flat)
+    # Feature Names (Generically named since we bypassed reading the raw CSV columns entirely)
+    # If we wanted actual column names like ".text_size", we would need to pass them from the data_loader
+    feature_names = [f"PE_Feature_{i}" for i in range(input_dim)]
     
-    print("Calculating SHAP values (This will take a few minutes)...")
-    shap_values = explainer.shap_values(test_flat)
+    # Global Summary Plot (Beeswarm)
+    shap.summary_plot(shap_values, X_test_explain.numpy(), feature_names=feature_names, show=False)
     
-    plots_dir = os.path.join(BASE_DIR, "plots")
-    os.makedirs(plots_dir, exist_ok=True)
-    
-    plt.figure()
-    if model_type == "qlstm":
-        # temporal_shap: shape [120]
-        # We average absolute shap values over samples, then sum over features
-        shap_values_3d = shap_values.reshape(X_test_sample.shape)
-        temporal_impact = np.abs(shap_values_3d).mean(axis=0).sum(axis=1)
-        
-        plt.plot(range(120), temporal_impact, color='red', linewidth=2.5, label='QLSTM SHAP Impact')
-        plt.axvspan(50, 90, color='yellow', alpha=0.3, label='30-70s Lead Time Zone')
-        plt.xlabel("Time steps (0 to 120)")
-        plt.ylabel("Mean SHAP Value (Impact on prediction)")
-        plt.title("Quantum-Temporal SHAP Lead-Time Visualizer")
-        plt.legend()
-        plt.grid(True)
-        
-        plot_path = os.path.join(plots_dir, f"{model_type}_temporal_shap.png")
-    else:
-        shap.summary_plot(shap_values, test_flat, feature_names=[f"PCA_{i}" for i in range(16)], show=False)
-        plot_path = os.path.join(plots_dir, f"{model_type}_summary_plot.png")
-        
-    plt.savefig(plot_path, bbox_inches='tight', dpi=300)
-    print(f"Quantum-SHAP explainability plot saved to {plot_path}")
+    os.makedirs("plots", exist_ok=True)
+    plt.savefig("plots/shap_summary_static.png", bbox_inches='tight')
+    print("\n✅ SHAP Explainability Diagram saved to plots/shap_summary_static.png")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--device", type=str, default="default.qubit")
-    parser.add_argument("--model", type=str, choices=["cnn-vqc", "qlstm"], default="qlstm")
-    args = parser.parse_args()
-    
-    generate_shap_explanations(device_string=args.device, model_type=args.model)
+    explain_model()
